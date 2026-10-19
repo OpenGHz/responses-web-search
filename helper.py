@@ -142,7 +142,8 @@ def cmd_check(args: List[str]) -> int:
 def cmd_register(args: List[str]) -> int:
     server_py = str(HERE / "server.py")
     before = json.loads(CLAUDE_JSON.read_text(encoding="utf-8")) if CLAUDE_JSON.exists() else {}
-    env = {k: os.environ[k] for k in ("RESPONSES_WEB_SEARCH_MODEL", "RESPONSES_WEB_SEARCH_EFFORT") if os.environ.get(k)}
+    keys = ("RESPONSES_WEB_SEARCH_MODEL", "RESPONSES_WEB_SEARCH_EFFORT", "RESPONSES_WEB_SEARCH_ALLOWED_MODELS")
+    env = {k: os.environ[k] for k in keys if os.environ.get(k)}
     existing = (before.get("mcpServers") or {}).get(NAME)
     if existing and existing.get("args") == [server_py] and (existing.get("env") or {}) == env:
         print(f"already registered with {server_py} and env {env}; skipping add")

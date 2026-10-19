@@ -4,7 +4,7 @@
 
 ## `HTTP 403 ... error code: 1010`
 
-这是 Cloudflare 按 User-Agent 拦截。Python urllib 的默认 UA 会被拦，`server.py` 已经改发自己的 UA（`responses-web-search/1.0.0`）。如果新中转站连这个也拦，把 `server.py` 里的 `USER_AGENT` 改成常见客户端的格式，例如 `curl/8.5.0`（在作者测试的中转站上验证过能通过）。
+这是 Cloudflare 按 User-Agent 拦截。Python urllib 的默认 UA 会被拦，`server.py` 已经改发自己的 UA（`responses-web-search/<版本号>`）。如果新中转站连这个也拦，把 `server.py` 里的 `USER_AGENT` 改成常见客户端的格式，例如 `curl/8.5.0`（在作者测试的中转站上验证过能通过）。
 
 ## `HTTP 503 ... no_available_providers`
 

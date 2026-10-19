@@ -20,9 +20,12 @@ Deliberate choices:
     from memory and the response carries no web_search_call at all.
   * A response with no completed web_search_call is returned as an error,
     never as a search result.
-  * Reasoning effort is the model's default unless RESPONSES_WEB_SEARCH_EFFORT
-    is set. Relays can silently replace an unsupported value with the
-    default, so the result reports the effort the API actually applied.
+  * A caller may pick `model` and `reasoning_effort` per call. Unset, they fall
+    back to RESPONSES_WEB_SEARCH_MODEL / RESPONSES_WEB_SEARCH_EFFORT, and an
+    unset effort leaves the model's own default. RESPONSES_WEB_SEARCH_ALLOWED_MODELS
+    (comma-separated) limits which models a caller may pick.
+  * Relays can silently replace an unsupported effort with the default, so the
+    result reports the effort the API actually applied and warns on a mismatch.
   * The relay sits behind Cloudflare, which rejects Python-urllib's default
     User-Agent (error 1010), so requests send their own.
 """
@@ -41,9 +44,12 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 SERVER_NAME = "responses-web-search"
-SERVER_VERSION = "1.0.0"
+SERVER_VERSION = "1.1.0"
 MODEL = os.environ.get("RESPONSES_WEB_SEARCH_MODEL", "gpt-6.1-sol")
 EFFORT = os.environ.get("RESPONSES_WEB_SEARCH_EFFORT", "").strip()  # empty: the model's own default
+# models a caller may pick per call; empty: any. MODEL is always allowed.
+ALLOWED_MODELS = [m.strip() for m in os.environ.get("RESPONSES_WEB_SEARCH_ALLOWED_MODELS", "").split(",") if m.strip()]
+EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"]
 TIMEOUT_SEC = float(os.environ.get("RESPONSES_WEB_SEARCH_TIMEOUT_SEC", "180"))
 SETTINGS_PATH = Path.home() / ".claude" / "settings.json"
 USER_AGENT = f"{SERVER_NAME}/{SERVER_VERSION}"
@@ -106,13 +112,19 @@ def responses_url(base: str) -> str:
     return base + ("/responses" if base.endswith("/v1") else "/v1/responses")
 
 
-def call_responses(query: str, allowed_domains: List[str]) -> Dict[str, Any]:
+def call_responses(query: str, allowed_domains: List[str],
+                   model: Optional[str] = None, effort: Optional[str] = None) -> Dict[str, Any]:
+    """POST /v1/responses; model and effort fall back to the RESPONSES_WEB_SEARCH_* settings."""
+    model = model or MODEL
+    effort = effort or EFFORT
+    if ALLOWED_MODELS and model not in ALLOWED_MODELS + [MODEL]:
+        raise SearchError(f"model {model!r} is not allowed here; allowed: {sorted(set(ALLOWED_MODELS + [MODEL]))}")
     base, token = load_credentials()
     tool: Dict[str, Any] = {"type": "web_search"}
     if allowed_domains:
         tool["filters"] = {"allowed_domains": allowed_domains}
     body = {
-        "model": MODEL,
+        "model": model,
         "instructions": INSTRUCTIONS,
         "input": query,
         "tools": [tool],
@@ -120,8 +132,8 @@ def call_responses(query: str, allowed_domains: List[str]) -> Dict[str, Any]:
         "include": ["web_search_call.action.sources"],
         "store": False,
     }
-    if EFFORT:
-        body["reasoning"] = {"effort": EFFORT}
+    if effort:
+        body["reasoning"] = {"effort": effort}
     request = urllib.request.Request(
         responses_url(base),
         data=json.dumps(body).encode("utf-8"),
@@ -212,13 +224,19 @@ def summarize(resp: Dict[str, Any]) -> Dict[str, Any]:
 
 # ─── MCP surface ─────────────────────────────────────────────────────────────
 
+_MODEL_CHOICE = (f"Allowed: {sorted(set(ALLOWED_MODELS + [MODEL]))}." if ALLOWED_MODELS
+                 else "Any model the relay serves on /v1/responses with web_search.")
+
 TOOLS = [
     {
         "name": "web_search",
         "description": (
             "Search the web through the OpenAI Responses API web_search tool. Every call performs a real search. "
             "Returns the answer, the source links it cites, all URLs the search consulted, and the search record "
-            "(each web_search_call with its status and queries)."
+            "(each web_search_call with its status and queries). "
+            "Leave model and reasoning_effort unset for ordinary lookups; raise reasoning_effort to high or above "
+            "only when the question needs several sources reconciled or careful verification, since higher effort "
+            "is slower and costs more."
         ),
         "inputSchema": {
             "type": "object",
@@ -228,6 +246,16 @@ TOOLS = [
                     "type": "array",
                     "items": {"type": "string"},
                     "description": "Optional. Restrict the search to these domains, e.g. [\"python.org\"]; subdomains are included.",
+                },
+                "model": {
+                    "type": "string",
+                    "description": f"Optional. The model that runs the search; default {MODEL}. {_MODEL_CHOICE}",
+                },
+                "reasoning_effort": {
+                    "type": "string",
+                    "enum": EFFORT_LEVELS,
+                    "description": "Optional. How hard the model reasons while searching; default "
+                                   + (EFFORT or "the model's own (medium for gpt-6.1-sol)") + ".",
                 },
             },
             "required": ["query"],
@@ -254,13 +282,23 @@ def handle_call(request: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(raw_domains, list):
         return error_response(request_id, -32602, "allowed_domains must be an array of strings")
     domains = [re.sub(r"^https?://", "", d.strip()).strip("/") for d in raw_domains if isinstance(d, str) and d.strip()]
+    model = args.get("model")
+    if model is not None and (not isinstance(model, str) or not model.strip()):
+        return error_response(request_id, -32602, "model must be a non-empty string")
+    effort = args.get("reasoning_effort")
+    if effort is not None and effort not in EFFORT_LEVELS:
+        return error_response(request_id, -32602, f"reasoning_effort must be one of {EFFORT_LEVELS}")
 
     try:
-        result = summarize(call_responses(query.strip(), domains))
+        result = summarize(call_responses(query.strip(), domains, model and model.strip(), effort))
     except SearchError as exc:
         text = f"web_search failed: {exc}"
         return {"jsonrpc": "2.0", "id": request_id,
                 "result": {"isError": True, "content": [{"type": "text", "text": text}]}}
+    requested = effort or EFFORT
+    if requested and result["reasoning_effort"] != requested:
+        result["warning"] = (f"requested reasoning_effort {requested!r} but the API applied "
+                             f"{result['reasoning_effort']!r}; the model does not support that level")
     # Claude Code hands the model structuredContent when present; the text block mirrors it for other clients
     text = json.dumps(result, ensure_ascii=False, indent=1)
     return {"jsonrpc": "2.0", "id": request_id,
