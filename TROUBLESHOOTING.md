@@ -1,62 +1,64 @@
-# 排障
+# Troubleshooting
 
-按报错文本找对应的条目。命令都在本目录下运行，全程不要打印密钥。
+English | [简体中文](TROUBLESHOOTING.zh-CN.md)
+
+Find the entry that matches the error text. Run commands from this directory, and keep the token out of all output.
 
 ## `HTTP 403 ... error code: 1010`
 
-这是 Cloudflare 按 User-Agent 拦截。Python urllib 的默认 UA 会被拦，`server.py` 已经改发自己的 UA（`responses-web-search/<版本号>`）。如果新中转站连这个也拦，把 `server.py` 里的 `USER_AGENT` 改成常见客户端的格式，例如 `curl/8.5.0`（在作者测试的中转站上验证过能通过）。
+Cloudflare is blocking by User-Agent. Python urllib's default UA gets blocked, so `server.py` already sends its own (`responses-web-search/<version>`). If a new relay blocks that too, change `USER_AGENT` in `server.py` to a common client format such as `curl/8.5.0` (verified to pass on the author's relay).
 
 ## `HTTP 503 ... no_available_providers`
 
-中转站没有把这个模型接到 `/v1/responses` 上，需要换模型：
+The relay doesn't route this model on `/v1/responses`, so switch models:
 
-1. 列出这个 token 能看到的模型：
+1. List the models this token can see:
    ```bash
    python3 -c 'import server,json,urllib.request as u
    b,t=server.load_credentials()
    r=u.Request(b+"/v1/models",headers={"Authorization":"Bearer "+t,"User-Agent":server.USER_AGENT})
    print([m["id"] for m in json.load(u.urlopen(r,timeout=30)).get("data",[])])'
    ```
-2. 这个列表并不完整。在作者测试的中转站上，列表里只有 `deepseek-*`，它们在 `/v1/responses` 上全部 503。反而是不在列表里的 `gpt-6.1-sol` 能用。所以也要试 GPT 系列的模型名，比如用户 Codex 配置（`~/.codex/config.toml` 的 `model`）里的那个。
-3. 逐个试：`RESPONSES_WEB_SEARCH_MODEL=<模型> python3 helper.py check`。找到 PASS 的模型后，带着同一个环境变量运行 README 第 3 步的 `register`。
+2. That list is incomplete. On the author's relay it showed only `deepseek-*`, all of which returned 503 on `/v1/responses`, while `gpt-6.1-sol`, which wasn't listed, worked. So also try GPT model names, such as the one in the user's Codex config (`model` in `~/.codex/config.toml`).
+3. Try them one at a time: `RESPONSES_WEB_SEARCH_MODEL=<model> python3 helper.py check`. Once one PASSes, run `register` from README step 3 with the same variable.
 
-如果设置了 `RESPONSES_WEB_SEARCH_EFFORT`，先去掉它再试一次。不支持的推理强度在作者测试的中转站上也会报这个 503（`service_unavailable_error`）。
+If `RESPONSES_WEB_SEARCH_EFFORT` is set, unset it and try again. On the author's relay an unsupported reasoning effort also produces this 503 (`service_unavailable_error`).
 
 ## `requested effort ... but the API applied ...`
 
-模型不支持这个推理强度，中转站换成了默认值。改用该模型支持的值（gpt-6.1-sol 支持 `low`、`medium`、`high`、`xhigh`、`max`），或者不设置 `RESPONSES_WEB_SEARCH_EFFORT`。
+The model doesn't support that reasoning effort, and the relay substituted the default. Use a value the model supports (gpt-6.1-sol supports `low`, `medium`, `high`, `xhigh`, `max`), or leave `RESPONSES_WEB_SEARCH_EFFORT` unset.
 
-## `HTTP 401`，或不是 1010 的 `403`
+## `HTTP 401`, or a `403` other than 1010
 
-token 无效或没有权限。先确认 Claude Code 本身能正常对话。token 来自 `~/.claude/settings.json` 的 `env.ANTHROPIC_AUTH_TOKEN`，或同名环境变量。排查时只比较长度或前 3 个字符，不要打印整个 token。
+The token is invalid or lacks permission. First confirm that Claude Code itself can chat normally. The token comes from `env.ANTHROPIC_AUTH_TOKEN` in `~/.claude/settings.json`, or from the environment variable of the same name. When debugging, compare only its length or its first 3 characters; never print the whole token.
 
 ## `no completed web_search_call`
 
-请求成功了，但模型没有真正去搜，说明这个模型或中转站不执行 web_search。按上面的方法换模型。都不行就说明不支持，停下并告诉用户。
+The request succeeded, but the model never actually searched, which means this model or relay doesn't execute web_search. Switch models as described above. If none works, it is unsupported: stop and tell the user.
 
 ## `ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN not found`
 
-这台电脑上的 Claude Code 不是通过 settings.json 的 env 或环境变量连接中转站的，例如用 OAuth 登录的官方账号。这个 MCP 依赖中转站，告诉用户实际情况，不要继续。
+Claude Code on this machine doesn't reach a relay through settings.json's env or environment variables; for example, it is signed in to an official account via OAuth. This MCP server depends on a relay, so tell the user how things stand and stop.
 
-## `register` 后不是 Connected
+## Not Connected after `register`
 
-- 手动运行 `python3 server.py`，正常情况下它会安静地等待输入（Ctrl-C 退出）。如果报错，按报错处理。
-- Claude Code 的 PATH 里可能没有 `python3`。先 `claude mcp remove responses-web-search -s user`，再用绝对路径注册：
+- Run `python3 server.py` by hand. Normally it waits quietly for input (Ctrl-C to quit). If it prints an error, fix that error.
+- `python3` may not be on Claude Code's PATH. Run `claude mcp remove responses-web-search -s user`, then register with absolute paths:
   `claude mcp add responses-web-search --scope user -- "$(command -v python3)" "$PWD/server.py"`
 
-## `builtin` 一直是 INCONCLUSIVE
+## `builtin` stays INCONCLUSIVE
 
-说明 Claude 没有按要求调用 WebSearch。可以手动跑：
-`claude -p '用 WebSearch 搜一次 latest Python release' --allowedTools WebSearch --output-format stream-json --verbose`
-然后在输出里找 `tool_use_result` 的 `searchCount`，0 表示没有真正搜索。
+Claude didn't call WebSearch as asked. Run it by hand:
+`claude -p 'Use WebSearch once to search for latest Python release' --allowedTools WebSearch --output-format stream-json --verbose`
+then find `searchCount` in the output's `tool_use_result`; 0 means no real search ran.
 
-## `e2e` 里 Claude 先用了别的工具
+## Claude used another tool first in `e2e`
 
-WebFetch，或描述里声明要处理搜索的 skill，也可能被先调用。在 `claude -p` 里它们没有权限，会失败；交互式会话里则会向用户请求授权。只要 MCP 最终被调用并成功，第 6 步就算 PASS。要不要限制其他工具由用户决定。
+WebFetch, or a skill whose description claims search requests, may be called first. Under `claude -p` they have no permission and fail; in an interactive session they ask the user for approval. Step 6 PASSes as long as the MCP tool is eventually called and succeeds. Whether to restrict the other tools is the user's decision.
 
-## 背景：为什么不用 Claude 自己搜
+## Background: why Claude doesn't search by itself
 
-以下是 2026-10 在作者使用的中转站上测得的结果：
-- **Claude Code 内置的 WebSearch：** 返回 `is_error=false`，但 `searchCount: 0, results: []`，属于静默失败。Claude 以为只是"没搜到"，就反复换关键词重试，这就是"连续失败"的来源。
-- **直接调 `/v1/messages` 的 web_search 服务端工具：** 对 Claude 模型的直接请求一律 503，不带工具也一样。同一时刻 Claude Code 本身却能正常工作，看起来中转站只放行 Claude Code 客户端。不要通过伪装成 Claude Code 客户端来绕过。
-- 换了中转站，结论可能不一样，所以 README 第 4 步每次都要实测。
+Measured in 2026-10 on the author's relay:
+- **Claude Code's built-in WebSearch:** returns `is_error=false` but `searchCount: 0, results: []`, a silent failure. Claude takes it as "nothing found" and keeps retrying with reworded queries, which is where the repeated failures come from.
+- **Calling the web_search server tool on `/v1/messages` directly:** every direct request for a Claude model returned 503, even without tools, while Claude Code itself worked at the same moment; the relay appears to admit only Claude Code clients. Do not impersonate the Claude Code client to get around this.
+- Results may differ on another relay, which is why README step 4 always measures.
