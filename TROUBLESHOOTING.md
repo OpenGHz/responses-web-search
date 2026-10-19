@@ -20,6 +20,12 @@
 2. 这个列表并不完整。在作者测试的中转站上，列表里只有 `deepseek-*`，它们在 `/v1/responses` 上全部 503。反而是不在列表里的 `gpt-6.1-sol` 能用。所以也要试 GPT 系列的模型名，比如用户 Codex 配置（`~/.codex/config.toml` 的 `model`）里的那个。
 3. 逐个试：`RESPONSES_WEB_SEARCH_MODEL=<模型> python3 helper.py check`。找到 PASS 的模型后，带着同一个环境变量运行 README 第 3 步的 `register`。
 
+如果设置了 `RESPONSES_WEB_SEARCH_EFFORT`，先去掉它再试一次。不支持的推理强度在作者测试的中转站上也会报这个 503（`service_unavailable_error`）。
+
+## `requested effort ... but the API applied ...`
+
+模型不支持这个推理强度，中转站换成了默认值。改用该模型支持的值（gpt-6.1-sol 支持 `low`、`medium`、`high`、`xhigh`、`max`），或者不设置 `RESPONSES_WEB_SEARCH_EFFORT`。
+
 ## `HTTP 401`，或不是 1010 的 `403`
 
 token 无效或没有权限。先确认 Claude Code 本身能正常对话。token 来自 `~/.claude/settings.json` 的 `env.ANTHROPIC_AUTH_TOKEN`，或同名环境变量。排查时只比较长度或前 3 个字符，不要打印整个 token。

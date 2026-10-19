@@ -117,7 +117,7 @@ def cmd_check(args: List[str]) -> int:
     query = " ".join(args) or "What is the latest stable Python release? Cite the source."
     try:
         base, _ = server.load_credentials()
-        print(f"model {server.MODEL}, endpoint {server.responses_url(base)}")
+        print(f"model {server.MODEL}, effort {server.EFFORT or '(model default)'}, endpoint {server.responses_url(base)}")
         result = server.summarize(server.call_responses(query, []))
     except server.SearchError as exc:
         print(f"FAIL: {exc}")
@@ -128,6 +128,12 @@ def cmd_check(args: List[str]) -> int:
     for s in result["searches"]:
         print(f"  search [{s['status']}] {s['action']}: {s.get('queries') or s.get('query') or s.get('url')} "
               f"({s['source_count']} sources)")
+    applied = result["reasoning_effort"]
+    print(f"reasoning effort applied: {applied}")
+    if server.EFFORT and applied != server.EFFORT:
+        print(f"FAIL: requested effort {server.EFFORT!r} but the API applied {applied!r}; "
+              "this model does not support that value")
+        return 1
     done = sum(s["status"] == "completed" for s in result["searches"])
     print(f"PASS: {done} completed web_search_call(s), {len(result['sources'])} sources consulted")
     return 0
@@ -136,19 +142,20 @@ def cmd_check(args: List[str]) -> int:
 def cmd_register(args: List[str]) -> int:
     server_py = str(HERE / "server.py")
     before = json.loads(CLAUDE_JSON.read_text(encoding="utf-8")) if CLAUDE_JSON.exists() else {}
+    env = {k: os.environ[k] for k in ("RESPONSES_WEB_SEARCH_MODEL", "RESPONSES_WEB_SEARCH_EFFORT") if os.environ.get(k)}
     existing = (before.get("mcpServers") or {}).get(NAME)
-    if existing and existing.get("args") == [server_py]:
-        print(f"already registered with {server_py}; skipping add")
+    if existing and existing.get("args") == [server_py] and (existing.get("env") or {}) == env:
+        print(f"already registered with {server_py} and env {env}; skipping add")
     elif existing:
-        print(f"FAIL: {NAME} is registered with different settings {existing}; "
-              f"remove it first: claude mcp remove {NAME} -s user")
+        print(mask(f"FAIL: {NAME} is registered with different settings {existing} (wanted env {env}); "
+                   f"remove it first: claude mcp remove {NAME} -s user"))
         return 1
     else:
         if CLAUDE_JSON.exists():
             print(f"backup: {backup(CLAUDE_JSON)}")
         cmd = ["claude", "mcp", "add", NAME, "--scope", "user"]
-        if os.environ.get("RESPONSES_WEB_SEARCH_MODEL"):
-            cmd += ["-e", f"RESPONSES_WEB_SEARCH_MODEL={os.environ['RESPONSES_WEB_SEARCH_MODEL']}"]
+        for key, value in env.items():
+            cmd += ["-e", f"{key}={value}"]
         cmd += ["--", "python3", server_py]
         proc = subprocess.run(cmd, capture_output=True, text=True)
         print(mask(proc.stdout + proc.stderr).strip())
@@ -227,12 +234,13 @@ def cmd_e2e(args: List[str]) -> int:
         if call["name"] != MCP_TOOL or result.get("is_error"):
             continue
         try:
-            searches = json.loads(result.get("text") or "{}").get("searches") or []
+            payload = json.loads(result.get("text") or "{}")
         except ValueError:
             continue
-        if any(s.get("status") == "completed" for s in searches):
+        if any(s.get("status") == "completed" for s in payload.get("searches") or []):
             first = calls[0]["name"]
-            print(f"PASS: the session searched through {MCP_TOOL} (first tool called: {first})")
+            print(f"PASS: the session searched through {MCP_TOOL} "
+                  f"(first tool called: {first}, reasoning effort applied: {payload.get('reasoning_effort')})")
             if "WebSearch" in tools:
                 print("NOTE: built-in WebSearch is still visible; Claude may try it first")
             return 0

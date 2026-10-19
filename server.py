@@ -20,6 +20,9 @@ Deliberate choices:
     from memory and the response carries no web_search_call at all.
   * A response with no completed web_search_call is returned as an error,
     never as a search result.
+  * Reasoning effort is the model's default unless RESPONSES_WEB_SEARCH_EFFORT
+    is set. Relays can silently replace an unsupported value with the
+    default, so the result reports the effort the API actually applied.
   * The relay sits behind Cloudflare, which rejects Python-urllib's default
     User-Agent (error 1010), so requests send their own.
 """
@@ -40,6 +43,7 @@ from typing import Any, Dict, List, Optional, Tuple
 SERVER_NAME = "responses-web-search"
 SERVER_VERSION = "1.0.0"
 MODEL = os.environ.get("RESPONSES_WEB_SEARCH_MODEL", "gpt-6.1-sol")
+EFFORT = os.environ.get("RESPONSES_WEB_SEARCH_EFFORT", "").strip()  # empty: the model's own default
 TIMEOUT_SEC = float(os.environ.get("RESPONSES_WEB_SEARCH_TIMEOUT_SEC", "180"))
 SETTINGS_PATH = Path.home() / ".claude" / "settings.json"
 USER_AGENT = f"{SERVER_NAME}/{SERVER_VERSION}"
@@ -116,6 +120,8 @@ def call_responses(query: str, allowed_domains: List[str]) -> Dict[str, Any]:
         "include": ["web_search_call.action.sources"],
         "store": False,
     }
+    if EFFORT:
+        body["reasoning"] = {"effort": EFFORT}
     request = urllib.request.Request(
         responses_url(base),
         data=json.dumps(body).encode("utf-8"),
@@ -198,6 +204,7 @@ def summarize(resp: Dict[str, Any]) -> Dict[str, Any]:
         "sources": sources,
         "searches": searches,
         "model": resp.get("model"),
+        "reasoning_effort": (resp.get("reasoning") or {}).get("effort"),
         "response_id": resp.get("id"),
         "status": status,
     }
