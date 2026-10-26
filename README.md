@@ -19,13 +19,13 @@ A local stdio MCP server that gives Claude Code a `web_search` tool. It runs rea
 This section is written for an agent to execute: tell Claude Code to "set this up following README.md".
 
 **Rules:**
-- The token lives only in the `env` block of `~/.claude/settings.json` or in the environment variable of the same name. When reading that file, look at key names only and mask every value. Keep the token out of code, config, command lines and logs; `helper.py` already masks it.
+- Tokens live only where Claude Code and Codex keep them: the `env` block of `~/.claude/settings.json` (or the environment variable of the same name) and `~/.codex/auth.json`. When reading those files, look at key names only and mask every value. Keep the token out of code, config, command lines and logs; `helper.py` already masks it.
 - Back up before changing config. `register` and `deny-websearch` back up automatically and print the backup path; note it and include it in the final report.
 - Run the steps in order. Move on only once the current step meets its completion criterion.
 
 **Prerequisites:**
 - Claude Code on this machine already works through a relay, i.e. `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` are in the `env` block of `~/.claude/settings.json`.
-- `python3` (3.8+, no packages) and the `claude` command are available.
+- `python3` (3.8+, no packages; 3.11+ for `RESPONSES_WEB_SEARCH_AUTH=codex`) and the `claude` command are available.
 - macOS or Linux.
 
 1. **Place the files.**
@@ -36,11 +36,12 @@ This section is written for an agent to execute: tell Claude Code to "set this u
 2. **Pre-check: does the relay support Responses API web_search?**
    `python3 helper.py check`
    Done when: the output says `PASS` and has at least one `search [completed]` line.
-   On FAIL, follow `TROUBLESHOOTING.md`. If support is ruled out (no model yields a completed web_search_call), stop and tell the user; do not register.
+   If it FAILs with `model_not_found` / `No available channel` and the user also has Codex set up against a relay, retry with `RESPONSES_WEB_SEARCH_AUTH=codex python3 helper.py check`: some relays give the Claude Code token no GPT models while the Codex key has them. Using the Codex key is the user's call, so ask before registering with it.
+   On other FAILs, follow `TROUBLESHOOTING.md`. If support is ruled out (no model yields a completed web_search_call), stop and tell the user; do not register.
 
 3. **Register the MCP server** (user scope, available in every project).
    `python3 helper.py register`
-   If step 2 needed a different model, or the user asked for a default reasoning effort or a model allowlist, first `export` the matching `RESPONSES_WEB_SEARCH_MODEL`, `RESPONSES_WEB_SEARCH_EFFORT`, `RESPONSES_WEB_SEARCH_ALLOWED_MODELS` (see "Tool reference" below), rerun step 2 with the same variables, and run this step once it PASSes. These values are written into the MCP config's env; they are not secrets.
+   If step 2 needed a different model, or the user asked for a default reasoning effort or a model allowlist, or step 2 only PASSed with the Codex key, first `export` the matching `RESPONSES_WEB_SEARCH_AUTH`, `RESPONSES_WEB_SEARCH_MODEL`, `RESPONSES_WEB_SEARCH_EFFORT`, `RESPONSES_WEB_SEARCH_ALLOWED_MODELS` (see "Tool reference" below), rerun step 2 with the same variables, and run this step once it PASSes. These values are written into the MCP config's env; they are not secrets.
    Done when: the output says `PASS: registered and Connected` and `changed top-level keys` lists only `mcpServers`. If the output says `did not exist`, `~/.claude.json` was just created and its other keys are expected. If other keys of an existing file changed, a running Claude Code instance probably wrote it at the same time; check, and report it to the user.
 
 4. **Test whether the built-in WebSearch really searches.**
@@ -93,13 +94,16 @@ The result is a JSON object (`structuredContent`), which is what Claude Code han
 Behavior:
 - Every call forces a real search (`tool_choice: "required"`). Without it, simple questions get answered from memory with no web_search_call.
 - If no web_search_call completed, the call returns an error (`isError`) instead of presenting an ungrounded answer as a search result.
-- Credentials are read at runtime: `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN` from the environment first, then from the `env` block of `~/.claude/settings.json`. The MCP config stores no secrets, and a token that appears in an error message is replaced with `***`.
+- Credentials are read at runtime from the source `RESPONSES_WEB_SEARCH_AUTH` names (below). The MCP config stores no secrets, and a token that appears in an error message is replaced with `***`.
 - Environment variables (defaults for calls that omit the arguments; an argument the agent passes takes precedence):
+  - `RESPONSES_WEB_SEARCH_AUTH`: where the relay address and token come from.
+    - `claude` (default): Claude Code's, i.e. `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN` from the environment, else from the `env` block of `~/.claude/settings.json`.
+    - `codex`: the Codex CLI's, i.e. the active model provider's `base_url` from `~/.codex/config.toml` and `OPENAI_API_KEY` from `~/.codex/auth.json` (`CODEX_HOME` overrides `~/.codex`). For relays that give the Claude Code token no GPT models while the Codex key has them. Needs Python 3.11+, and an API key in `auth.json` (a ChatGPT sign-in has none). Search then depends on the Codex key, so it breaks if that key changes.
   - `RESPONSES_WEB_SEARCH_MODEL`: default `gpt-6.1-sol`.
   - `RESPONSES_WEB_SEARCH_ALLOWED_MODELS`: comma-separated; limits which models an agent may pick through the `model` argument. `RESPONSES_WEB_SEARCH_MODEL` is always allowed. Unset means no limit.
   - `RESPONSES_WEB_SEARCH_EFFORT`: reasoning effort. Unset, no `reasoning` field is sent and the model's own default applies (`medium` for gpt-6.1-sol). gpt-6.1-sol supports `low`, `medium`, `high`, `xhigh`, `max`. Higher effort searches and cross-checks more thoroughly but is slower and costs more. On the author's relay, unsupported values (such as `none` or `minimal`) return 503 when web_search is attached, and are silently replaced with the default when no tool is attached. `helper.py check` FAILs in both cases, so run `check` after changing the effort.
   - `RESPONSES_WEB_SEARCH_TIMEOUT_SEC`: default 180. Raise it when you raise the reasoning effort.
-- To change the default model, default effort or allowlist after registering: run `claude mcp remove responses-web-search -s user`, rerun steps 2 and 3 with the new variables, then restart Claude Code.
+- To change the credential source, default model, default effort or allowlist after registering: run `claude mcp remove responses-web-search -s user`, rerun steps 2 and 3 with the new variables, then restart Claude Code.
 
 ## Undo
 

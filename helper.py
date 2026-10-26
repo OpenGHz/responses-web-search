@@ -42,16 +42,24 @@ SETTINGS = server.SETTINGS_PATH
 # ─── shared ──────────────────────────────────────────────────────────────────
 
 def backup(path: Path) -> Path:
-    dest = path.with_name(f"{path.name}.bak-{time.strftime('%Y%m%d-%H%M%S')}")
+    """Copy path to a timestamped sibling, never overwriting an earlier backup."""
+    stamp = path.with_name(f"{path.name}.bak-{time.strftime('%Y%m%d-%H%M%S')}")
+    dest, n = stamp, 1
+    while dest.exists():
+        dest, n = stamp.with_name(f"{stamp.name}-{n}"), n + 1
     shutil.copy2(path, dest)
     return dest
 
 
 def secrets() -> List[str]:
-    """Every token value this setup could leak: the environment's and settings.json's."""
+    """Every token value this setup could leak: Claude Code's (environment, settings.json) and the Codex key."""
     found = [os.environ.get("ANTHROPIC_AUTH_TOKEN", "")]
     try:
         found.append((json.loads(SETTINGS.read_text(encoding="utf-8")).get("env") or {}).get("ANTHROPIC_AUTH_TOKEN", ""))
+    except (OSError, ValueError):
+        pass
+    try:
+        found.append(json.loads((server.CODEX_HOME / "auth.json").read_text(encoding="utf-8")).get("OPENAI_API_KEY") or "")
     except (OSError, ValueError):
         pass
     return [s for s in set(found) if s]
@@ -117,7 +125,8 @@ def cmd_check(args: List[str]) -> int:
     query = " ".join(args) or "What is the latest stable Python release? Cite the source."
     try:
         base, _ = server.load_credentials()
-        print(f"model {server.MODEL}, effort {server.EFFORT or '(model default)'}, endpoint {server.responses_url(base)}")
+        print(f"auth {server.AUTH}, model {server.MODEL}, effort {server.EFFORT or '(model default)'}, "
+              f"endpoint {server.responses_url(base)}")
         result = server.summarize(server.call_responses(query, []))
     except server.SearchError as exc:
         print(f"FAIL: {exc}")
@@ -142,7 +151,8 @@ def cmd_check(args: List[str]) -> int:
 def cmd_register(args: List[str]) -> int:
     server_py = str(HERE / "server.py")
     before = json.loads(CLAUDE_JSON.read_text(encoding="utf-8")) if CLAUDE_JSON.exists() else {}
-    keys = ("RESPONSES_WEB_SEARCH_MODEL", "RESPONSES_WEB_SEARCH_EFFORT", "RESPONSES_WEB_SEARCH_ALLOWED_MODELS")
+    keys = ("RESPONSES_WEB_SEARCH_AUTH", "RESPONSES_WEB_SEARCH_MODEL", "RESPONSES_WEB_SEARCH_EFFORT",
+            "RESPONSES_WEB_SEARCH_ALLOWED_MODELS")
     env = {k: os.environ[k] for k in keys if os.environ.get(k)}
     existing = (before.get("mcpServers") or {}).get(NAME)
     if existing and existing.get("args") == [server_py] and (existing.get("env") or {}) == env:
@@ -252,7 +262,7 @@ def cmd_e2e(args: List[str]) -> int:
 def cmd_leaks(args: List[str]) -> int:
     tokens = secrets()
     if not tokens:
-        print("FAIL: no ANTHROPIC_AUTH_TOKEN found to scan for")
+        print("FAIL: no token found to scan for (Claude Code or Codex)")
         return 1
     paths = [p for p in HERE.rglob("*") if p.is_file()]
     paths += [CLAUDE_JSON, *CLAUDE_JSON.parent.glob(".claude.json.bak-*")]

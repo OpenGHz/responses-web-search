@@ -28,6 +28,10 @@ If `RESPONSES_WEB_SEARCH_EFFORT` is set, unset it and try again. On the author's
 
 The model doesn't support that reasoning effort, and the relay substituted the default. Use a value the model supports (gpt-6.1-sol supports `low`, `medium`, `high`, `xhigh`, `max`), or leave `RESPONSES_WEB_SEARCH_EFFORT` unset.
 
+## `HTTP 503 ... model_not_found` / `No available channel for model`
+
+The token in use has no access to this model; on some relays the Claude Code token's group has no GPT models at all. First try another model as in the entry above. If the user also uses Codex against a relay, try its key: `RESPONSES_WEB_SEARCH_AUTH=codex python3 helper.py check`. If that PASSes, ask the user whether to use the Codex key, then remove the registration and rerun README step 3 with the same variable. Asking the relay admin to give the Claude Code token's group a GPT model also fixes it, with no change here.
+
 ## `HTTP 401`, or a `403` other than 1010
 
 The token is invalid or lacks permission. First confirm that Claude Code itself can chat normally. The token comes from `env.ANTHROPIC_AUTH_TOKEN` in `~/.claude/settings.json`, or from the environment variable of the same name. When debugging, compare only its length or its first 3 characters; never print the whole token.
@@ -38,7 +42,11 @@ The request succeeded, but the model never actually searched, which means this m
 
 ## `ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN not found`
 
-Claude Code on this machine doesn't reach a relay through settings.json's env or environment variables; for example, it is signed in to an official account via OAuth. This MCP server depends on a relay, so tell the user how things stand and stop.
+Claude Code on this machine doesn't reach a relay through settings.json's env or environment variables; for example, it is signed in to an official account via OAuth. This MCP server depends on a relay. If the user's Codex CLI uses a relay with an API key, `RESPONSES_WEB_SEARCH_AUTH=codex` may work (see the entry above); otherwise tell the user how things stand and stop.
+
+## `cannot read .../config.toml`, `no OPENAI_API_KEY in .../auth.json`, `needs Python 3.11+`
+
+Only with `RESPONSES_WEB_SEARCH_AUTH=codex`: Codex isn't set up at `~/.codex` (point `CODEX_HOME` at the right directory), it is signed in with ChatGPT instead of an API key, or `python3` is older than 3.11. Fix that, or switch back to `RESPONSES_WEB_SEARCH_AUTH=claude`.
 
 ## Not Connected after `register`
 

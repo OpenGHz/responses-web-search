@@ -6,10 +6,17 @@ Exposes one MCP tool, `web_search`. Each call sends the query to
 Claude Code already talks to, and returns the answer, the links it cites,
 every URL the search consulted, and the record of each search call.
 
-Credentials are the ones Claude Code itself uses: ANTHROPIC_BASE_URL and
-ANTHROPIC_AUTH_TOKEN from the environment, or from the "env" block of
-~/.claude/settings.json when the environment lacks them. Nothing is stored,
-and the token is scrubbed from any error text before it is returned.
+Credentials are read at call time, from one of two sources picked by
+RESPONSES_WEB_SEARCH_AUTH:
+  * claude (default): the ones Claude Code itself uses, ANTHROPIC_BASE_URL and
+    ANTHROPIC_AUTH_TOKEN from the environment, or from the "env" block of
+    ~/.claude/settings.json when the environment lacks them.
+  * codex: the Codex CLI's, the active model provider's base_url from
+    $CODEX_HOME/config.toml and OPENAI_API_KEY from $CODEX_HOME/auth.json
+    (CODEX_HOME defaults to ~/.codex). For relays that give the Claude Code
+    token no GPT models while the Codex key has them. Needs Python 3.11+.
+Nothing is stored, and the token is scrubbed from any error text before it
+is returned.
 
 Register:
 
@@ -44,8 +51,10 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 SERVER_NAME = "responses-web-search"
-SERVER_VERSION = "1.1.0"
-MODEL = os.environ.get("RESPONSES_WEB_SEARCH_MODEL", "gpt-6.1-sol")
+SERVER_VERSION = "1.2.0"
+AUTH = os.environ.get("RESPONSES_WEB_SEARCH_AUTH", "claude").strip().lower()  # claude | codex
+CODEX_HOME = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex")
+MODEL =os.environ.get("RESPONSES_WEB_SEARCH_MODEL", "gpt-6.1-sol")
 EFFORT = os.environ.get("RESPONSES_WEB_SEARCH_EFFORT", "").strip()  # empty: the model's own default
 # models a caller may pick per call; empty: any. MODEL is always allowed.
 ALLOWED_MODELS = [m.strip() for m in os.environ.get("RESPONSES_WEB_SEARCH_ALLOWED_MODELS", "").split(",") if m.strip()]
@@ -93,6 +102,42 @@ def read_message() -> Optional[Dict[str, Any]]:
 # ─── Responses API call ──────────────────────────────────────────────────────
 
 def load_credentials() -> Tuple[str, str]:
+    """(base_url, token) from the source RESPONSES_WEB_SEARCH_AUTH names."""
+    if AUTH == "claude":
+        return load_claude_credentials()
+    if AUTH == "codex":
+        return load_codex_credentials()
+    raise SearchError(f"RESPONSES_WEB_SEARCH_AUTH must be 'claude' or 'codex', not {AUTH!r}")
+
+
+def load_codex_credentials() -> Tuple[str, str]:
+    """The active Codex model provider's base_url and the Codex OPENAI_API_KEY."""
+    try:
+        import tomllib
+    except ImportError:
+        raise SearchError("RESPONSES_WEB_SEARCH_AUTH=codex needs Python 3.11+ (tomllib)") from None
+    config_path = CODEX_HOME / "config.toml"
+    auth_path = CODEX_HOME / "auth.json"
+    try:
+        config = tomllib.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise SearchError(f"cannot read {config_path}: {exc}") from None
+    provider = config.get("model_provider", "openai")
+    base = ((config.get("model_providers") or {}).get(provider) or {}).get("base_url", "")
+    if not base and provider == "openai":
+        base = "https://api.openai.com/v1"
+    try:
+        token = json.loads(auth_path.read_text(encoding="utf-8")).get("OPENAI_API_KEY") or ""
+    except (OSError, ValueError):
+        token = ""
+    if not base:
+        raise SearchError(f"model provider {provider!r} has no base_url in {config_path}")
+    if not token:
+        raise SearchError(f"no OPENAI_API_KEY in {auth_path} (a ChatGPT sign-in has no API key to reuse)")
+    return base.rstrip("/"), token
+
+
+def load_claude_credentials() -> Tuple[str, str]:
     """(base_url, token) from the environment, else from ~/.claude/settings.json's env block."""
     base = os.environ.get("ANTHROPIC_BASE_URL", "")
     token = os.environ.get("ANTHROPIC_AUTH_TOKEN", "")

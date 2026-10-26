@@ -28,6 +28,10 @@
 
 模型不支持这个推理强度，中转站换成了默认值。改用该模型支持的值（gpt-6.1-sol 支持 `low`、`medium`、`high`、`xhigh`、`max`），或者不设置 `RESPONSES_WEB_SEARCH_EFFORT`。
 
+## `HTTP 503 ... model_not_found` / `No available channel for model`
+
+当前使用的 key 没有这个模型的权限；有些中转站给 Claude Code 的 key 所在分组完全没有 GPT 模型。先按上一条的方法换模型。如果用户也通过中转站使用 Codex，可以试试它的 key：`RESPONSES_WEB_SEARCH_AUTH=codex python3 helper.py check`。PASS 的话，先问用户是否改用 Codex 的 key，再移除注册，带着同一个变量重跑 README 第 3 步。另一个办法是请中转站管理员给 Claude Code 的 key 所在分组开通 GPT 模型，这样这里什么都不用改。
+
 ## `HTTP 401`，或不是 1010 的 `403`
 
 token 无效或没有权限。先确认 Claude Code 本身能正常对话。token 来自 `~/.claude/settings.json` 的 `env.ANTHROPIC_AUTH_TOKEN`，或同名环境变量。排查时只比较长度或前 3 个字符，不要打印整个 token。
@@ -38,7 +42,11 @@ token 无效或没有权限。先确认 Claude Code 本身能正常对话。toke
 
 ## `ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN not found`
 
-这台电脑上的 Claude Code 不是通过 settings.json 的 env 或环境变量连接中转站的，例如用 OAuth 登录的官方账号。这个 MCP 依赖中转站，告诉用户实际情况，不要继续。
+这台电脑上的 Claude Code 不是通过 settings.json 的 env 或环境变量连接中转站的，例如用 OAuth 登录的官方账号。这个 MCP 依赖中转站。如果用户的 Codex CLI 用 API key 连接中转站，可以试 `RESPONSES_WEB_SEARCH_AUTH=codex`（见上一条）；否则告诉用户实际情况，不要继续。
+
+## `cannot read .../config.toml`、`no OPENAI_API_KEY in .../auth.json`、`needs Python 3.11+`
+
+只在 `RESPONSES_WEB_SEARCH_AUTH=codex` 时出现：Codex 没有配置在 `~/.codex`（用 `CODEX_HOME` 指向正确目录），或者用的是 ChatGPT 账号登录而不是 API key，或者 `python3` 低于 3.11。解决对应问题，或者改回 `RESPONSES_WEB_SEARCH_AUTH=claude`。
 
 ## `register` 后不是 Connected
 

@@ -19,13 +19,13 @@
 这一节是写给 agent 执行的：让 Claude Code "按 README 完成配置"即可。
 
 **规则：**
-- 密钥只存在 `~/.claude/settings.json` 的 `env` 里，或同名环境变量里。读这个文件时只看字段名，值一律掩码。不要把密钥写进代码、配置、命令行或日志。`helper.py` 已经做了掩码。
+- 密钥只存在 Claude Code 和 Codex 自己存放的位置：`~/.claude/settings.json` 的 `env`（或同名环境变量），以及 `~/.codex/auth.json`。读这些文件时只看字段名，值一律掩码。不要把密钥写进代码、配置、命令行或日志。`helper.py` 已经做了掩码。
 - 改配置前先备份。`register` 和 `deny-websearch` 会自动备份并打印备份路径，记下来，最后汇报给用户。
 - 按顺序执行。每一步达到完成标准后再进入下一步。
 
 **前提：**
 - 这台电脑上的 Claude Code 已经通过中转站正常工作，即 `ANTHROPIC_BASE_URL` 和 `ANTHROPIC_AUTH_TOKEN` 在 `~/.claude/settings.json` 的 `env` 里。
-- 有 `python3`（3.8 及以上，不用装包）和 `claude` 命令。
+- 有 `python3`（3.8 及以上，不用装包；`RESPONSES_WEB_SEARCH_AUTH=codex` 需要 3.11 及以上）和 `claude` 命令。
 - 系统是 macOS 或 Linux。
 
 1. **放置文件。**
@@ -36,11 +36,12 @@
 2. **预检：中转站支不支持 Responses API 的 web_search。**
    `python3 helper.py check`
    完成标准：输出 `PASS`，且至少有一行 `search [completed]`。
-   如果 FAIL，按 `TROUBLESHOOTING.zh-CN.md` 处理。如果确认不支持（换了模型也拿不到 completed 的 web_search_call），就停下，告诉用户，不要注册。
+   如果 FAIL 报的是 `model_not_found` / `No available channel`，并且用户也配置了通过中转站使用的 Codex，就用 `RESPONSES_WEB_SEARCH_AUTH=codex python3 helper.py check` 再试一次：有些中转站给 Claude Code 的 key 没开 GPT 模型，Codex 的 key 却有。要不要改用 Codex 的 key 由用户决定，注册前先问用户。
+   其他 FAIL 按 `TROUBLESHOOTING.zh-CN.md` 处理。如果确认不支持（换了模型也拿不到 completed 的 web_search_call），就停下，告诉用户，不要注册。
 
 3. **注册 MCP**（user scope，所有项目都能用）。
    `python3 helper.py register`
-   如果第 2 步换过模型，或用户指定了默认推理强度、模型允许列表，先 `export` 对应的 `RESPONSES_WEB_SEARCH_MODEL`、`RESPONSES_WEB_SEARCH_EFFORT`、`RESPONSES_WEB_SEARCH_ALLOWED_MODELS`（见下方"工具说明"），并用同样的变量重跑一次第 2 步，PASS 后再运行这一步。这些值会写进 MCP 配置的 env，它们不是密钥。
+   如果第 2 步换过模型，或用户指定了默认推理强度、模型允许列表，或第 2 步只有用 Codex 的 key 才 PASS，先 `export` 对应的 `RESPONSES_WEB_SEARCH_AUTH`、`RESPONSES_WEB_SEARCH_MODEL`、`RESPONSES_WEB_SEARCH_EFFORT`、`RESPONSES_WEB_SEARCH_ALLOWED_MODELS`（见下方"工具说明"），并用同样的变量重跑一次第 2 步，PASS 后再运行这一步。这些值会写进 MCP 配置的 env，它们不是密钥。
    完成标准：输出 `PASS: registered and Connected`，且 `changed top-level keys` 只有 `mcpServers`。如果输出的是 `did not exist`，说明 `~/.claude.json` 是这次新建的，其他 key 本来就会有。如果已有文件里有别的 key 变了，通常是正在运行的 Claude Code 同时写了这个文件，核对后汇报给用户。
 
 4. **测内置 WebSearch 能不能真的搜。**
@@ -93,13 +94,16 @@
 行为：
 - 每次调用都强制真实搜索（`tool_choice: "required"`）。不加这一项的话，简单问题会直接凭记忆回答，不产生 web_search_call。
 - 没有 completed 的 web_search_call 时返回错误（`isError`），不会把没经过搜索的答案当作搜索结果。
-- 认证在运行时读取 `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN`：先看环境变量，没有再读 `~/.claude/settings.json` 的 `env`。MCP 配置里不存密钥。如果错误信息里出现密钥，会被替换成 `***`。
+- 认证信息在运行时从 `RESPONSES_WEB_SEARCH_AUTH` 指定的来源读取（见下）。MCP 配置里不存密钥。如果错误信息里出现密钥，会被替换成 `***`。
 - 可用的环境变量（都是调用时不传参数的默认值；agent 传了参数就以参数为准）：
+  - `RESPONSES_WEB_SEARCH_AUTH`：中转站地址和 key 从哪里读。
+    - `claude`（默认）：用 Claude Code 的，即 `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN`，先看环境变量，没有再读 `~/.claude/settings.json` 的 `env`。
+    - `codex`：用 Codex CLI 的，即 `~/.codex/config.toml` 里当前 model provider 的 `base_url`，以及 `~/.codex/auth.json` 的 `OPENAI_API_KEY`（可用 `CODEX_HOME` 替换 `~/.codex`）。适用于中转站给 Claude Code 的 key 没开 GPT、Codex 的 key 却有的情况。需要 Python 3.11 及以上，且 `auth.json` 里有 API key（用 ChatGPT 账号登录的没有）。之后搜索依赖 Codex 的 key，这个 key 一变搜索就会失效。
   - `RESPONSES_WEB_SEARCH_MODEL`：默认 `gpt-6.1-sol`。
   - `RESPONSES_WEB_SEARCH_ALLOWED_MODELS`：逗号分隔，限制 agent 能通过 `model` 参数选哪些模型。`RESPONSES_WEB_SEARCH_MODEL` 总是允许的。不设置则不限制。
   - `RESPONSES_WEB_SEARCH_EFFORT`：推理强度。不设置时不发送 `reasoning` 字段，使用模型自己的默认值，gpt-6.1-sol 是 `medium`。gpt-6.1-sol 支持 `low`、`medium`、`high`、`xhigh`、`max`。强度越高，搜索和核对越充分，但更慢、更贵。不支持的值（如 `none`、`minimal`）在作者测试的中转站上，带 web_search 时会返回 503，不带工具时会被静默换成默认值。这两种情况 `helper.py check` 都会报 FAIL，所以改强度后先跑一次 `check`。
   - `RESPONSES_WEB_SEARCH_TIMEOUT_SEC`：默认 180。调高推理强度时可以相应调大。
-- 已经注册后想改默认模型、默认强度或允许列表：先 `claude mcp remove responses-web-search -s user`，带着新的环境变量重跑第 2、3 步，再重启 Claude Code。
+- 已经注册后想改认证来源、默认模型、默认强度或允许列表：先 `claude mcp remove responses-web-search -s user`，带着新的环境变量重跑第 2、3 步，再重启 Claude Code。
 
 ## 撤销
 
