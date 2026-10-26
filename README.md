@@ -25,7 +25,7 @@ This section is written for an agent to execute: tell Claude Code to "set this u
 
 **Prerequisites:**
 - Claude Code on this machine already works through a relay, i.e. `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` are in the `env` block of `~/.claude/settings.json`.
-- `python3` (3.8+, no packages; 3.11+ for `RESPONSES_WEB_SEARCH_AUTH=codex`) and the `claude` command are available.
+- `python3` (3.8+, no packages) and the `claude` command are available.
 - macOS or Linux.
 
 1. **Place the files.**
@@ -98,7 +98,7 @@ Behavior:
 - Environment variables (defaults for calls that omit the arguments; an argument the agent passes takes precedence):
   - `RESPONSES_WEB_SEARCH_AUTH`: where the relay address and token come from.
     - `claude` (default): Claude Code's, i.e. `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN` from the environment, else from the `env` block of `~/.claude/settings.json`.
-    - `codex`: the Codex CLI's, i.e. the active model provider's `base_url` from `~/.codex/config.toml` and `OPENAI_API_KEY` from `~/.codex/auth.json` (`CODEX_HOME` overrides `~/.codex`). For relays that give the Claude Code token no GPT models while the Codex key has them. Needs Python 3.11+, and an API key in `auth.json` (a ChatGPT sign-in has none). Search then depends on the Codex key, so it breaks if that key changes.
+    - `codex`: the Codex CLI's, i.e. the active model provider's `base_url` from `~/.codex/config.toml` and `OPENAI_API_KEY` from `~/.codex/auth.json` (`CODEX_HOME` overrides `~/.codex`). For relays that give the Claude Code token no GPT models while the Codex key has them. Needs an API key in `auth.json` (a ChatGPT sign-in has none). Search then depends on the Codex key, so it breaks if that key changes.
   - `RESPONSES_WEB_SEARCH_MODEL`: default `gpt-6.1-sol`.
   - `RESPONSES_WEB_SEARCH_ALLOWED_MODELS`: comma-separated; limits which models an agent may pick through the `model` argument. `RESPONSES_WEB_SEARCH_MODEL` is always allowed. Unset means no limit.
   - `RESPONSES_WEB_SEARCH_EFFORT`: reasoning effort. Unset, no `reasoning` field is sent and the model's own default applies (`medium` for gpt-6.1-sol). gpt-6.1-sol supports `low`, `medium`, `high`, `xhigh`, `max`. Higher effort searches and cross-checks more thoroughly but is slower and costs more. On the author's relay, unsupported values (such as `none` or `minimal`) return 503 when web_search is attached, and are silently replaced with the default when no tool is attached. `helper.py check` FAILs in both cases, so run `check` after changing the effort.

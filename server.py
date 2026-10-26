@@ -14,7 +14,9 @@ RESPONSES_WEB_SEARCH_AUTH:
   * codex: the Codex CLI's, the active model provider's base_url from
     $CODEX_HOME/config.toml and OPENAI_API_KEY from $CODEX_HOME/auth.json
     (CODEX_HOME defaults to ~/.codex). For relays that give the Claude Code
-    token no GPT models while the Codex key has them. Needs Python 3.11+.
+    token no GPT models while the Codex key has them. Uses tomllib on Python
+    3.11+, and a small reader of the needed string keys before that, because
+    a project's activated venv can put an older python3 first on PATH.
 Nothing is stored, and the token is scrubbed from any error text before it
 is returned.
 
@@ -51,7 +53,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 SERVER_NAME = "responses-web-search"
-SERVER_VERSION = "1.2.0"
+SERVER_VERSION = "1.2.1"
 AUTH = os.environ.get("RESPONSES_WEB_SEARCH_AUTH", "claude").strip().lower()  # claude | codex
 CODEX_HOME = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex")
 MODEL =os.environ.get("RESPONSES_WEB_SEARCH_MODEL", "gpt-6.1-sol")
@@ -110,16 +112,63 @@ def load_credentials() -> Tuple[str, str]:
     raise SearchError(f"RESPONSES_WEB_SEARCH_AUTH must be 'claude' or 'codex', not {AUTH!r}")
 
 
+_TOML_TABLE = re.compile(r"^\[\s*([^\[\]]+?)\s*\]\s*(?:#.*)?$")
+_TOML_STRING_KEY = re.compile(r"""^([A-Za-z0-9_-]+|"[^"]*")\s*=\s*(?:"((?:[^"\\]|\\.)*)"|'([^']*)')\s*(?:#.*)?$""")
+
+
+def parse_toml_strings(text: str) -> Dict[str, Any]:
+    """The [tables] and single-line string keys of a TOML file, for Pythons without tomllib (< 3.11).
+
+    Enough for Codex's model_provider and model_providers.<name>.base_url; other value types,
+    dotted keys and [[arrays of tables]] are skipped.
+    """
+    root: Dict[str, Any] = {}
+    table: Dict[str, Any] = root
+    closing = ""  # the delimiter of the multi-line string being skipped
+    for raw in text.splitlines():
+        line = raw.strip()
+        if closing:
+            if closing in line:
+                closing = ""
+            continue
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("[["):
+            table = {}  # an array-of-tables entry; its keys must not land in the previous table
+            continue
+        match = _TOML_TABLE.match(line)
+        if match:
+            table = root
+            for quoted, bare in re.findall(r'"([^"]*)"|([^."\s]+)', match.group(1)):
+                table = table.setdefault(quoted or bare, {})
+            continue
+        for delim in ('"""', "'''"):
+            _, sep, rest = line.partition("=")
+            if sep and rest.strip().startswith(delim) and delim not in rest.strip()[3:]:
+                closing = delim
+        match = _TOML_STRING_KEY.match(line)
+        if match:
+            basic, literal = match.group(2), match.group(3)
+            if basic is not None:
+                try:
+                    basic = json.loads(f'"{basic}"')
+                except ValueError:
+                    pass
+            table[match.group(1).strip('"')] = basic if basic is not None else literal
+    return root
+
+
 def load_codex_credentials() -> Tuple[str, str]:
     """The active Codex model provider's base_url and the Codex OPENAI_API_KEY."""
-    try:
-        import tomllib
-    except ImportError:
-        raise SearchError("RESPONSES_WEB_SEARCH_AUTH=codex needs Python 3.11+ (tomllib)") from None
     config_path = CODEX_HOME / "config.toml"
     auth_path = CODEX_HOME / "auth.json"
     try:
-        config = tomllib.loads(config_path.read_text(encoding="utf-8"))
+        text = config_path.read_text(encoding="utf-8")
+        try:
+            import tomllib
+            config = tomllib.loads(text)
+        except ImportError:
+            config = parse_toml_strings(text)
     except (OSError, ValueError) as exc:
         raise SearchError(f"cannot read {config_path}: {exc}") from None
     provider = config.get("model_provider", "openai")

@@ -25,7 +25,7 @@
 
 **前提：**
 - 这台电脑上的 Claude Code 已经通过中转站正常工作，即 `ANTHROPIC_BASE_URL` 和 `ANTHROPIC_AUTH_TOKEN` 在 `~/.claude/settings.json` 的 `env` 里。
-- 有 `python3`（3.8 及以上，不用装包；`RESPONSES_WEB_SEARCH_AUTH=codex` 需要 3.11 及以上）和 `claude` 命令。
+- 有 `python3`（3.8 及以上，不用装包）和 `claude` 命令。
 - 系统是 macOS 或 Linux。
 
 1. **放置文件。**
@@ -98,7 +98,7 @@
 - 可用的环境变量（都是调用时不传参数的默认值；agent 传了参数就以参数为准）：
   - `RESPONSES_WEB_SEARCH_AUTH`：中转站地址和 key 从哪里读。
     - `claude`（默认）：用 Claude Code 的，即 `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN`，先看环境变量，没有再读 `~/.claude/settings.json` 的 `env`。
-    - `codex`：用 Codex CLI 的，即 `~/.codex/config.toml` 里当前 model provider 的 `base_url`，以及 `~/.codex/auth.json` 的 `OPENAI_API_KEY`（可用 `CODEX_HOME` 替换 `~/.codex`）。适用于中转站给 Claude Code 的 key 没开 GPT、Codex 的 key 却有的情况。需要 Python 3.11 及以上，且 `auth.json` 里有 API key（用 ChatGPT 账号登录的没有）。之后搜索依赖 Codex 的 key，这个 key 一变搜索就会失效。
+    - `codex`：用 Codex CLI 的，即 `~/.codex/config.toml` 里当前 model provider 的 `base_url`，以及 `~/.codex/auth.json` 的 `OPENAI_API_KEY`（可用 `CODEX_HOME` 替换 `~/.codex`）。适用于中转站给 Claude Code 的 key 没开 GPT、Codex 的 key 却有的情况。需要 `auth.json` 里有 API key（用 ChatGPT 账号登录的没有）。之后搜索依赖 Codex 的 key，这个 key 一变搜索就会失效。
   - `RESPONSES_WEB_SEARCH_MODEL`：默认 `gpt-6.1-sol`。
   - `RESPONSES_WEB_SEARCH_ALLOWED_MODELS`：逗号分隔，限制 agent 能通过 `model` 参数选哪些模型。`RESPONSES_WEB_SEARCH_MODEL` 总是允许的。不设置则不限制。
   - `RESPONSES_WEB_SEARCH_EFFORT`：推理强度。不设置时不发送 `reasoning` 字段，使用模型自己的默认值，gpt-6.1-sol 是 `medium`。gpt-6.1-sol 支持 `low`、`medium`、`high`、`xhigh`、`max`。强度越高，搜索和核对越充分，但更慢、更贵。不支持的值（如 `none`、`minimal`）在作者测试的中转站上，带 web_search 时会返回 503，不带工具时会被静默换成默认值。这两种情况 `helper.py check` 都会报 FAIL，所以改强度后先跑一次 `check`。

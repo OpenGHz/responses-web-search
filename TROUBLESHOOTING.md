@@ -44,9 +44,9 @@ The request succeeded, but the model never actually searched, which means this m
 
 Claude Code on this machine doesn't reach a relay through settings.json's env or environment variables; for example, it is signed in to an official account via OAuth. This MCP server depends on a relay. If the user's Codex CLI uses a relay with an API key, `RESPONSES_WEB_SEARCH_AUTH=codex` may work (see the entry above); otherwise tell the user how things stand and stop.
 
-## `cannot read .../config.toml`, `no OPENAI_API_KEY in .../auth.json`, `needs Python 3.11+`
+## `cannot read .../config.toml`, `no OPENAI_API_KEY in .../auth.json`
 
-Only with `RESPONSES_WEB_SEARCH_AUTH=codex`: Codex isn't set up at `~/.codex` (point `CODEX_HOME` at the right directory), it is signed in with ChatGPT instead of an API key, or `python3` is older than 3.11. Fix that, or switch back to `RESPONSES_WEB_SEARCH_AUTH=claude`.
+Only with `RESPONSES_WEB_SEARCH_AUTH=codex`: Codex isn't set up at `~/.codex` (point `CODEX_HOME` at the right directory), or it is signed in with ChatGPT instead of an API key. Fix that, or switch back to `RESPONSES_WEB_SEARCH_AUTH=claude`.
 
 ## Not Connected after `register`
 

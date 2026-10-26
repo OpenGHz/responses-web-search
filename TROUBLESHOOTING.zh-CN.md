@@ -44,9 +44,9 @@ token 无效或没有权限。先确认 Claude Code 本身能正常对话。toke
 
 这台电脑上的 Claude Code 不是通过 settings.json 的 env 或环境变量连接中转站的，例如用 OAuth 登录的官方账号。这个 MCP 依赖中转站。如果用户的 Codex CLI 用 API key 连接中转站，可以试 `RESPONSES_WEB_SEARCH_AUTH=codex`（见上一条）；否则告诉用户实际情况，不要继续。
 
-## `cannot read .../config.toml`、`no OPENAI_API_KEY in .../auth.json`、`needs Python 3.11+`
+## `cannot read .../config.toml`、`no OPENAI_API_KEY in .../auth.json`
 
-只在 `RESPONSES_WEB_SEARCH_AUTH=codex` 时出现：Codex 没有配置在 `~/.codex`（用 `CODEX_HOME` 指向正确目录），或者用的是 ChatGPT 账号登录而不是 API key，或者 `python3` 低于 3.11。解决对应问题，或者改回 `RESPONSES_WEB_SEARCH_AUTH=claude`。
+只在 `RESPONSES_WEB_SEARCH_AUTH=codex` 时出现：Codex 没有配置在 `~/.codex`（用 `CODEX_HOME` 指向正确目录），或者用的是 ChatGPT 账号登录而不是 API key。解决对应问题，或者改回 `RESPONSES_WEB_SEARCH_AUTH=claude`。
 
 ## `register` 后不是 Connected
 
